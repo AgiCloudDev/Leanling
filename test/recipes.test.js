@@ -115,12 +115,24 @@ test('container: limiti e host in più; la prova con i dati non pubblica porte n
   assert.deepEqual(containerArgs(spec, {}, {}, { ports: false, volumes: false, hosts: false }), ['--memory', '1g', '--cpus', '2']);
 });
 
-test('guarddog: blocca dal rischio alto, avvisa sotto, e capisce anche il formato vecchio', async () => {
+test('guarddog: il punteggio avvisa, le regole nette bloccano, e il riepilogo nomina i pacchetti', async () => {
   const { guarddogVerdict } = await import('../src/scan.js');
-  const pkg = (label, score) => `\x1b[1mAssessment:\x1b[0m  ${label}  (${score}/10)\n`;
-  assert.equal(guarddogVerdict(pkg('No risks detected', '0.0') + pkg('No risks detected', '0.0')).status, 'ok');
-  assert.equal(guarddogVerdict(pkg('No risks detected', '0.0') + pkg('Low risk', '4.3')).status, 'avviso');
-  assert.equal(guarddogVerdict(pkg('Low risk', '4.3') + pkg('High risk', '8.1')).status, 'bloccante');
+  const pkg = (name, score, rules = []) =>
+    (rules.length ? `Scanning ${name}, found ${rules.length} risks.\n` : `No risks found in ${name}\n`) +
+    rules.map((r) => `│ * ${r}\n│   descrizione\n`).join('') +
+    `\x1b[1mAssessment:\x1b[0m  etichetta  (${score}/10)\n`;
+  assert.equal(guarddogVerdict(pkg('a', '0.0') + pkg('b', '0.0')).status, 'ok');
+  assert.equal(guarddogVerdict(pkg('a', '0.0') + pkg('b', '4.3', ['threat.filesystem.read'])).status, 'avviso');
+  // una libreria grande e sana: punteggio alto ma solo euristiche generiche
+  const big = guarddogVerdict(pkg('flask', '4.3', ['threat.filesystem.read']) + pkg('torch', '9.4', ['threat.process.spawn', 'threat.runtime.obfuscation']));
+  assert.equal(big.status, 'avviso');
+  assert.match(big.summary, /torch 9\.4/);
+  assert.doesNotMatch(big.summary, /flask 4\.3/);
+  // regole nette: bastano anche con un punteggio basso
+  const bad = guarddogVerdict(pkg('torch', '9.4', ['threat.process.spawn']) + pkg('reqeusts', '3.0', ['typosquatting', 'threat.setup.network-in-install']));
+  assert.equal(bad.status, 'bloccante');
+  assert.match(bad.summary, /Da fermare: reqeusts \(typosquatting, threat\.setup\.network-in-install\)/);
+  assert.equal(guarddogVerdict(pkg('x', '2.0', ['threat.network.reverse-shell'])).status, 'bloccante');
   assert.equal(guarddogVerdict('Found 0 potentially malicious indicators').status, 'ok');
   assert.equal(guarddogVerdict('Found 3 potentially malicious indicators in x').status, 'bloccante');
 });
