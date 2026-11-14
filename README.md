@@ -78,13 +78,29 @@ Nightly updates are just a cron line:
 0 4 * * *  leanling update uptime-kuma >> ~/.leanling/cron.log 2>&1
 ```
 
+## Test on a copy of your data
+
+An empty child that starts is not enough: the new version must also start on *your* data. If the volumes of the installed app already exist, every update also does this:
+
+1. it copies the named volumes (the running app is paused only for the seconds of the copy, so the files are consistent);
+2. it starts the child on the copy, with the same env vars as production but **with no network**: migrations run on real data, while automations, webhooks and outgoing calls cannot reach anyone;
+3. it runs the checks (`dataChecks` if the recipe has them), then deletes the container and the copies.
+
+Your real data is never touched. You can switch this test off per recipe in the Container tab.
+
+## Replacing a container made by hand or with compose
+
+In the Container tab, **Replaces** takes the name of the existing container (for example `app-app-1`). On install Leanling stops it without deleting it, starts the child on the same volumes, and checks it. If the child does not answer, the child is removed and the old container is started again as it was.
+
+If other containers reach the app by the old name, add it as an alias on the network: `my_network:app-app-1`. If something on your server restarts the old container by itself (a monitor script, a compose `up` in cron), switch that off first.
+
 ## Dashboard
 
 The dashboard listens on `127.0.0.1` only. To reach it from outside, either put it behind a proxy with authentication, or start it with `LEANLING_TOKEN=a-secret` and open it with `?token=a-secret`.
 
 It has four sections:
 - **Selections**: what to remove from the child, group by group. Anything new found in the latest release is highlighted, and you decide whether to keep it.
-- **Container**: name, ports, volumes, memory limit, extra env vars, auto-install, image publishing.
+- **Container**: name, ports, volumes, memory and CPU limits, one or more Docker networks (with aliases), extra hosts, extra env vars, the container it replaces, the test on a copy of the data, auto-install, image publishing.
 - **Activity**: steps, scanners, the agent's review and the live log, plus history.
 - **Settings**: agent, access (subscription or API key), model, scanners, how many versions to keep.
 
@@ -128,6 +144,7 @@ Your recipes stay on your machine; the Leanling repo ships only the engine and o
 - `type: "image"`: starts from an official image (`image`, `tag`). Each entry in `options` becomes env vars: `env` for single values, `list` for comma-separated lists. `discover` can read from the image what exists, so new features show up immediately.
 - `type: "build"`: starts from a git repo (`repo`, `ref`) and applies `patches`. Each patch is a `.patch` file with an `intent` in plain words, which the agent uses to redo it. `maxSizeMB` stops the update if the image grows heavy again.
 - `test`: the internal port and HTTP checks (`status`, `json`, `contains`) that must pass before install.
+  `dataChecks` (optional) are the checks used when the child runs on existing data, for example a page that proves your data is there.
 - `container`: defaults for the installed container, editable from the dashboard.
 
 Rules for recipes:

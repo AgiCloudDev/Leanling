@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join } from 'node:path';
 import { askAgent, agentStatus, parseVerdict } from './agent.js';
 import { HOME, loadConfig, loadState, recipeSettings, saveState } from './config.js';
-import { buildEnv, containerSpec, getRecipe, resolveOptions, resolvePatches } from './recipes.js';
+import { buildEnv, containerArgs, containerSpec, getRecipe, namedVolumes, parseNetworks, resolveOptions, resolvePatches } from './recipes.js';
 import { scanImage, scanSource } from './scan.js';
 import { freePort, run, sleep } from './sh.js';
 
@@ -105,29 +105,61 @@ const docker = (args, opts) => run('docker', args, opts);
 const imageId = async (ref) => (await docker(['image', 'inspect', '-f', '{{.Id}}', ref])).out.trim() || null;
 const imageSizeMB = async (ref) => Math.round(Number((await docker(['image', 'inspect', '-f', '{{.Size}}', ref])).out.trim()) / 1e6);
 
-function containerArgs(spec, image, env, labels) {
-  const args = [];
-  for (const p of spec.ports ?? []) args.push('-p', p);
-  for (const v of spec.volumes ?? []) args.push('-v', v);
-  for (const [k, v] of Object.entries(env)) args.push('-e', `${k}=${v}`);
-  for (const [k, v] of Object.entries(labels)) args.push('--label', `${k}=${v}`);
-  if (spec.memory) args.push('--memory', spec.memory);
-  if (spec.network) args.push('--network', spec.network);
-  return [...args, image];
+/**
+ * Crea e avvia il container installato. Docker collega una sola rete alla creazione:
+ * le altre si aggiungono prima dell'avvio, cosi' il programma parte con tutte le reti gia' pronte.
+ */
+async function launch(spec, image, env, labels) {
+  const [first, ...others] = parseNetworks(spec);
+  const args = ['create', '--name', spec.name, '--restart', spec.restart ?? 'unless-stopped', ...containerArgs(spec, env, labels)];
+  if (first) args.push('--network', first.name, ...first.aliases.flatMap((a) => ['--network-alias', a]));
+  const c = await docker([...args, image]);
+  if (c.code !== 0) throw new Error(c.err.trim());
+  for (const n of others) {
+    const x = await docker(['network', 'connect', ...n.aliases.flatMap((a) => ['--alias', a]), n.name, spec.name]);
+    if (x.code !== 0) {
+      await docker(['rm', '-f', spec.name]);
+      throw new Error(`Rete ${n.name}: ${x.err.trim()}`);
+    }
+  }
+  const s = await docker(['start', spec.name]);
+  if (s.code !== 0) {
+    await docker(['rm', '-f', spec.name]);
+    throw new Error(s.err.trim());
+  }
+  return c.out.trim();
 }
 
+/** Richiesta HTTP dalla macchina verso una porta pubblicata su 127.0.0.1 */
+const hostRequest = (port) => async (c) => {
+  const res = await fetch(`http://127.0.0.1:${port}${c.path}`, {
+    method: c.method ?? 'GET',
+    headers: c.body ? { 'content-type': 'application/json' } : {},
+    body: c.body ? JSON.stringify(c.body) : undefined,
+    signal: AbortSignal.timeout(60_000),
+  });
+  return { status: res.status, text: await res.text() };
+};
+
+// Immagine di servizio per le prove con i dati: copia i volumi e interroga il container isolato
+const HELPER = process.env.LEANLING_HELPER_IMAGE ?? 'curlimages/curl:latest';
+
+/** Richiesta HTTP fatta da dentro la rete di un container senza rete: nulla esce e nulla entra */
+const containerRequest = (name, port) => async (c) => {
+  const args = ['run', '--rm', '--network', `container:${name}`, '--entrypoint', 'curl', HELPER, '-s', '-m', '60', '-X', c.method ?? 'GET', '-w', '\n%{http_code}'];
+  if (c.body) args.push('-H', 'content-type: application/json', '-d', JSON.stringify(c.body));
+  const r = await docker([...args, `http://127.0.0.1:${port}${c.path}`]);
+  if (r.code !== 0) throw new Error('non risponde');
+  const cut = r.out.lastIndexOf('\n');
+  return { status: Number(r.out.slice(cut + 1)), text: r.out.slice(0, cut) };
+};
+
 /** Controlli HTTP del test: stato, campi JSON attesi, testo atteso */
-async function httpChecks(port, checks) {
+async function httpChecks(request, checks) {
   for (const c of checks) {
-    const res = await fetch(`http://127.0.0.1:${port}${c.path}`, {
-      method: c.method ?? 'GET',
-      headers: c.body ? { 'content-type': 'application/json' } : {},
-      body: c.body ? JSON.stringify(c.body) : undefined,
-      signal: AbortSignal.timeout(60_000),
-    });
-    const text = await res.text();
-    if (c.status && res.status !== c.status) return `${c.path}: stato ${res.status}, atteso ${c.status}`;
-    if (c.ok && !res.ok) return `${c.path}: stato ${res.status}`;
+    const { status, text } = await request(c);
+    if (c.status && status !== c.status) return `${c.path}: stato ${status}, atteso ${c.status}`;
+    if (c.ok && !(status >= 200 && status < 300)) return `${c.path}: stato ${status}`;
     if (c.contains && !text.includes(c.contains)) return `${c.path}: manca "${c.contains}" nella risposta`;
     if (c.json) {
       const body = JSON.parse(text);
@@ -137,12 +169,12 @@ async function httpChecks(port, checks) {
   return null;
 }
 
-async function waitHealthy(port, test, log) {
+async function waitHealthy(request, test, log, checks = test.checks) {
   const deadline = Date.now() + (test.startTimeout ?? 120) * 1000;
   let last = 'non risponde';
   while (Date.now() < deadline) {
     try {
-      last = await httpChecks(port, test.checks.slice(0, 1));
+      last = await httpChecks(request, checks.slice(0, 1));
       if (!last) break;
     } catch (e) {
       last = e.cause?.code ?? e.message;
@@ -151,7 +183,7 @@ async function waitHealthy(port, test, log) {
   }
   if (last) return `Non pronto entro ${test.startTimeout ?? 120}s: ${last}`;
   log('pronto, eseguo i controlli');
-  return httpChecks(port, test.checks);
+  return httpChecks(request, checks);
 }
 
 /** Avvia il figlio in un container usa e getta (porta libera, nessun volume) e lo mette alla prova */
@@ -162,7 +194,7 @@ async function testImage(recipe, image, env, log) {
   const r = await docker(['run', '-d', '--name', name, '-p', `127.0.0.1:${port}:${recipe.test.port}`, ...Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]), '--label', 'leanling.test=1', image]);
   if (r.code !== 0) throw new Error(`Il container di prova non parte: ${r.err.trim()}`);
   try {
-    const fail = await waitHealthy(port, recipe.test, log);
+    const fail = await waitHealthy(hostRequest(port), recipe.test, log);
     if (fail) {
       const logs = await docker(['logs', '--tail', '30', name]);
       throw new Error(`${fail}\n--- ultime righe del container ---\n${(logs.out + logs.err).trim()}`);
@@ -171,6 +203,65 @@ async function testImage(recipe, image, env, log) {
     return { status: 'ok', detail: `pronto in ${Math.round((Date.now() - started) / 1000)}s, RAM ${ram}` };
   } finally {
     await docker(['rm', '-f', name]);
+  }
+}
+
+/**
+ * Prova con i dati veri: copia i volumi dell'installazione in uso e avvia il figlio sulla copia,
+ * con le stesse variabili della produzione ma senza rete. Cosi' le migrazioni girano sui dati reali,
+ * e automazioni, webhook e invii non possono raggiungere nessuno. L'installazione in uso viene
+ * messa in pausa solo per i secondi della copia, per avere file coerenti.
+ */
+async function testWithData(recipe, settings, image, env, log) {
+  if (settings.dataTest === false) return { status: 'ok', detail: 'spenta nelle impostazioni' };
+  const spec = containerSpec(recipe, settings);
+  const sources = [];
+  for (const v of namedVolumes(spec)) if ((await docker(['volume', 'inspect', v.src])).code === 0) sources.push(v);
+  if (!sources.length) return { status: 'ok', detail: 'nessun volume con dati esistenti: prova saltata' };
+
+  const name = `leanling-test-${recipe.name}-dati-${Date.now().toString(36)}`;
+  const copies = sources.map((v, i) => ({ ...v, copy: `${name}-${i}` }));
+  try {
+    const users = new Set();
+    for (const v of sources) {
+      const ids = (await docker(['ps', '-q', '--filter', `volume=${v.src}`, '--filter', 'status=running'])).out.trim().split('\n').filter(Boolean);
+      ids.forEach((id) => users.add(id));
+    }
+    const pull = await docker(['pull', '-q', HELPER]);
+    if (pull.code !== 0 && (await docker(['image', 'inspect', HELPER])).code !== 0) throw new Error(`Non riesco a scaricare ${HELPER}: ${pull.err.trim()}`);
+    for (const c of copies) {
+      const v = await docker(['volume', 'create', '--label', 'leanling.test=1', c.copy]);
+      if (v.code !== 0) throw new Error(v.err.trim());
+    }
+    const paused = [];
+    const pausedAt = Date.now();
+    try {
+      for (const id of users) if ((await docker(['pause', id])).code === 0) paused.push(id);
+      for (const c of copies) {
+        const cp = await docker(['run', '--rm', '--user', '0', '--network', 'none', '--entrypoint', 'cp', '-v', `${c.src}:/from:ro`, '-v', `${c.copy}:/to`, HELPER, '-a', '/from/.', '/to/']);
+        if (cp.code !== 0) throw new Error(`Copia di ${c.src} non riuscita: ${cp.err.trim()}`);
+      }
+    } finally {
+      for (const id of paused) await docker(['unpause', id]);
+    }
+    log(`volumi copiati: ${copies.length}${paused.length ? ` (installazione in pausa per ${Math.round((Date.now() - pausedAt) / 1000)}s)` : ''}`);
+
+    const args = ['run', '-d', '--name', name, '--network', 'none', ...containerArgs(spec, env, { 'leanling.test': '1' }, { ports: false, volumes: false, hosts: false })];
+    for (const c of copies) args.push('-v', `${c.copy}:${c.dest}`);
+    const run0 = await docker([...args, image]);
+    if (run0.code !== 0) throw new Error(`Il container di prova non parte: ${run0.err.trim()}`);
+    const t0 = Date.now();
+    const fail = await waitHealthy(containerRequest(name, recipe.test.port), recipe.test, log, recipe.test.dataChecks ?? recipe.test.checks);
+    if (fail) {
+      const logs = await docker(['logs', '--tail', '40', name]);
+      throw new Error(`Con i dati veri: ${fail}\n--- ultime righe del container ---\n${(logs.out + logs.err).trim()}`);
+    }
+    const state = (await docker(['inspect', '-f', '{{.State.Status}} {{.RestartCount}}', name])).out.trim();
+    if (state !== 'running 0') throw new Error(`Con i dati veri il container non resta in piedi (${state})`);
+    return { status: 'ok', detail: `${copies.map((c) => c.src).join(', ')}: pronto in ${Math.round((Date.now() - t0) / 1000)}s sulla copia dei dati` };
+  } finally {
+    await docker(['rm', '-f', name]);
+    for (const c of copies) await docker(['volume', 'rm', '-f', c.copy]);
   }
 }
 
@@ -270,6 +361,7 @@ async function prepareImage(recipe, cfg, settings, r, log, force) {
   const env = buildEnv(recipe, settings, available);
   await scanAndGate(cfg, r, log, () => scanImage(cfg, tag, log), 'Scansione dell\'immagine');
   await step(r, log, 'Prova del figlio', () => testImage(recipe, tag, env, log));
+  if (recipe.test) await step(r, log, 'Prova con una copia dei dati', () => testWithData(recipe, settings, tag, env, log));
   return { image: tag, imageId: pulled.id, version: pulled.version, env };
 }
 
@@ -350,6 +442,7 @@ async function prepareBuild(recipe, cfg, settings, r, log, force) {
     await scanAndGate(cfg, r, log, () => scanImage(cfg, tag, log), 'Scansione dell\'immagine');
     const env = buildEnv(recipe, settings, null);
     await step(r, log, 'Prova del figlio', () => testImage(recipe, tag, env, log));
+    if (recipe.test) await step(r, log, 'Prova con una copia dei dati', () => testWithData(recipe, settings, tag, env, log));
     return { image: tag, imageId: await imageId(tag), version: head.sha.slice(0, 8), commit: head.sha, env };
   } finally {
     await git(['worktree', 'remove', '--force', tmp]);
@@ -420,31 +513,61 @@ export async function promote(name, { echo = false, target = 'candidate', parent
     // Le variabili sono quelle con cui il figlio e' stato provato: se cambi le scelte, va preparato di nuovo
     const env = next.env ?? {};
 
-    await step(r, log, `Installo ${next.version} come "${spec.name}"`, async () => {
-      const owner = (await docker(['inspect', '-f', `{{index .Config.Labels "${LABEL}"}}`, spec.name])).out.trim();
-      const exists = (await docker(['inspect', spec.name])).code === 0;
-      if (exists && owner !== name && !settings.adopt) {
-        throw new Error(`Esiste già un container "${spec.name}" che Leanling non ha creato. Scegli un altro nome nella scheda Contenitore oppure attiva "Adotta il container esistente".`);
-      }
-      if (exists) await docker(['rm', '-f', spec.name]);
-      const c = await docker(['run', '-d', '--name', spec.name, '--restart', 'unless-stopped', ...containerArgs(spec, next.image, env, { [LABEL]: name, 'leanling.version': next.version })]);
-      if (c.code !== 0) throw new Error(c.err.trim());
-      return { status: 'ok', detail: c.out.trim().slice(0, 12) };
-    });
+    // "Sostituisce": un container fatto a mano o con compose che va fermato (non cancellato) per lasciare posto al figlio
+    let replaced = null;
+    const restoreReplaced = async () => {
+      if (!replaced) return '';
+      await docker(['rm', '-f', spec.name]);
+      await docker(['update', '--restart', replaced.restart, replaced.name]);
+      const st = await docker(['start', replaced.name]);
+      return st.code === 0 ? ` Riavviato "${replaced.name}" com'era prima.` : ` Non riesco a riavviare "${replaced.name}": ${st.err.trim()}`;
+    };
+
+    try {
+      await step(r, log, `Installo ${next.version} come "${spec.name}"`, async () => {
+        const owner = (await docker(['inspect', '-f', `{{index .Config.Labels "${LABEL}"}}`, spec.name])).out.trim();
+        const exists = (await docker(['inspect', spec.name])).code === 0;
+        if (exists && owner !== name && !settings.adopt) {
+          throw new Error(`Esiste già un container "${spec.name}" che Leanling non ha creato. Scegli un altro nome nella scheda Contenitore oppure attiva "Adotta il container esistente".`);
+        }
+        const old = settings.replaces?.trim();
+        if (old && old !== spec.name) {
+          const info = (await docker(['inspect', '-f', '{{.State.Running}} {{.HostConfig.RestartPolicy.Name}}', old])).out.trim().split(' ');
+          if (info[0] === 'true') {
+            replaced = { name: old, restart: info[1] || 'no' };
+            // Senza questo Docker lo farebbe ripartire al riavvio della macchina, sulla stessa porta del figlio
+            await docker(['update', '--restart', 'no', old]);
+            const st = await docker(['stop', old]);
+            if (st.code !== 0) throw new Error(`Non riesco a fermare "${old}": ${st.err.trim()}`);
+            log(`fermato "${old}" (resta sul disco, non viene cancellato)`);
+          }
+        }
+        if (exists) await docker(['rm', '-f', spec.name]);
+        const id = await launch(spec, next.image, env, { [LABEL]: name, 'leanling.version': next.version });
+        return { status: 'ok', detail: id.slice(0, 12) };
+      });
+    } catch (e) {
+      throw new Error(`${e.message}${await restoreReplaced()}`);
+    }
 
     const hostPort = Number((spec.ports?.[0] ?? '').split(':').at(-2));
     if (hostPort && recipe.test) {
       try {
         await step(r, log, 'Controllo dopo l\'installazione', async () => {
-          const fail = await waitHealthy(hostPort, recipe.test, log);
+          // Se c'erano gia' dei dati (sostituzione o aggiornamento) si controlla anche che il figlio li veda
+          const fail = await waitHealthy(hostRequest(hostPort), recipe.test, log, (replaced || s.current) && recipe.test.dataChecks ? recipe.test.dataChecks : recipe.test.checks);
           if (fail) throw new Error(fail);
           return { status: 'ok', detail: `risponde su ${hostPort}` };
         });
       } catch (e) {
+        if (replaced) {
+          log(`non risponde: rimetto "${replaced.name}"`);
+          throw new Error(`${e.message}.${await restoreReplaced()}`);
+        }
         if (target !== 'candidate' || !s.current) throw e;
         log('non risponde: torno alla versione di prima');
         await docker(['rm', '-f', spec.name]);
-        await docker(['run', '-d', '--name', spec.name, '--restart', 'unless-stopped', ...containerArgs(spec, s.current.image, s.current.env ?? {}, { [LABEL]: name, 'leanling.version': s.current.version })]);
+        await launch(spec, s.current.image, s.current.env ?? {}, { [LABEL]: name, 'leanling.version': s.current.version });
         throw new Error(`${e.message}. Rimessa la versione ${s.current.version}.`);
       }
     }

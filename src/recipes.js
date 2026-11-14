@@ -69,6 +69,40 @@ export function containerSpec(recipe, settings) {
   return { ...recipe.container, ...Object.fromEntries(Object.entries(settings.container).filter(([k]) => k !== 'env')) };
 }
 
+/** Reti del container: `networks` (una o piu', "rete" oppure "rete:alias1,alias2") piu' la vecchia voce singola `network` */
+export function parseNetworks(spec) {
+  const seen = new Set();
+  return [...(spec.networks ?? []), ...(spec.network ? [spec.network] : [])]
+    .map((n) => String(n).trim())
+    .filter(Boolean)
+    .map((n) => {
+      const [name, aliases = ''] = n.split(':');
+      return { name: name.trim(), aliases: aliases.split(',').map((a) => a.trim()).filter(Boolean) };
+    })
+    .filter((n) => n.name && !seen.has(n.name) && seen.add(n.name));
+}
+
+/** Volumi con nome ("dati:/percorso"); i percorsi della macchina ("/srv/x:/percorso") restano fuori */
+export function namedVolumes(spec) {
+  return (spec.volumes ?? [])
+    .map((v) => String(v).split(':'))
+    .filter(([src, dest]) => src && dest && !/^[./~]/.test(src))
+    .map(([src, ...rest]) => ({ src, dest: rest.join(':') }));
+}
+
+/** Argomenti di `docker create/run` che non dipendono dalla rete: porte, volumi, variabili, etichette, limiti */
+export function containerArgs(spec, env, labels = {}, { ports = true, volumes = true, hosts = true } = {}) {
+  const args = [];
+  if (ports) for (const p of spec.ports ?? []) args.push('-p', p);
+  if (volumes) for (const v of spec.volumes ?? []) args.push('-v', v);
+  for (const [k, v] of Object.entries(env)) args.push('-e', `${k}=${v}`);
+  for (const [k, v] of Object.entries(labels)) args.push('--label', `${k}=${v}`);
+  if (spec.memory) args.push('--memory', String(spec.memory));
+  if (spec.cpus) args.push('--cpus', String(spec.cpus));
+  if (hosts) for (const h of spec.extraHosts ?? []) args.push('--add-host', h);
+  return args;
+}
+
 /** Salva una ricetta dell'utente in ~/.leanling/recipes/<nome> */
 export function writeRecipe(recipe) {
   const dir = join(USER, recipe.name);

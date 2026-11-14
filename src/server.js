@@ -34,7 +34,7 @@ function recipeView(r, cfg, state) {
     patches: resolvePatches(r, settings).map(({ path, ...p }) => p),
     container: containerSpec(r, settings),
     containerEnv: settings.container.env ?? {},
-    deploy: settings.deploy, adopt: !!settings.adopt, publishAs: settings.publishAs,
+    deploy: settings.deploy, adopt: !!settings.adopt, replaces: settings.replaces ?? '', dataTest: settings.dataTest !== false, publishAs: settings.publishAs,
     env: buildEnv(r, settings, null),
     state: state[r.name] ?? {},
     running: runningId(r.name),
@@ -129,6 +129,8 @@ export function startServer({ port = 7878, host = '127.0.0.1' } = {}) {
             extraOptions: b.extraOptions ?? cur.extraOptions,
             deploy: b.deploy ?? cur.deploy,
             adopt: b.adopt ?? cur.adopt,
+            replaces: b.replaces ?? cur.replaces,
+            dataTest: b.dataTest ?? cur.dataTest,
             publishAs: b.publishAs ?? cur.publishAs,
           };
           saveConfig(cfg);

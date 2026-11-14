@@ -44,8 +44,8 @@ export async function scanSource(cfg, { dir, range, manifests = [], log }) {
       const eco = m.endsWith('package.json') || m.endsWith('package-lock.json') ? 'npm' : 'pypi';
       log(`scanner: ${SCANNERS.guarddog.label} su ${m}`);
       const r = await run('guarddog', [eco, 'verify', file], { timeout: 900 });
-      const found = /Found \d+ potentially malicious/i.test(r.out) && !/Found 0 potentially/i.test(r.out);
-      results.push({ id: 'guarddog', status: r.code !== 0 ? 'errore' : found ? 'bloccante' : 'ok', detail: tail(r.out || r.err) });
+      const v = guarddogVerdict(r.out);
+      results.push({ id: 'guarddog', status: r.code !== 0 ? 'errore' : v.status, detail: [v.summary, tail(r.out || r.err)].filter(Boolean).join('\n') });
     }
   }
 
@@ -78,5 +78,23 @@ export async function scanImage(cfg, image, log) {
   }
 }
 
+/**
+ * Esito di GuardDog. Dalla 3 ogni pacchetto ha un punteggio da 0 a 10: le euristiche segnalano spesso
+ * anche pacchetti sani con punteggi bassi, quindi si blocca solo dal rischio alto (7) in su e sotto si avvisa.
+ * Le versioni prima della 3 scrivevano "Found N potentially malicious indicators".
+ */
+export function guarddogVerdict(out) {
+  const text = clean(out);
+  const scores = [...text.matchAll(/Assessment:\s*([^(\n]+?)\s*\((\d+(?:\.\d+)?)\/10\)/g)].map((m) => Number(m[2]));
+  if (scores.length) {
+    const max = Math.max(...scores);
+    const flagged = scores.filter((x) => x > 0).length;
+    return { status: max >= 7 ? 'bloccante' : max > 0 ? 'avviso' : 'ok', summary: `${scores.length} pacchetti controllati, ${flagged} con segnalazioni, punteggio più alto ${max}/10` };
+  }
+  const old = [...text.matchAll(/Found (\d+) potentially malicious/gi)].some((m) => Number(m[1]) > 0);
+  return { status: old ? 'bloccante' : 'ok', summary: '' };
+}
+
 // Senza codici colore e link del terminale, che nella dashboard diventano spazzatura
-const tail = (s) => s.replace(/\x1b\[[0-9;]*m|\x1b\]8;;[^\x1b]*\x1b\\/g, '').trim().split('\n').slice(-15).join('\n');
+const clean = (s) => s.replace(/\x1b\[[0-9;]*m|\x1b\]8;;[^\x1b]*\x1b\\/g, '');
+const tail = (s) => clean(s).trim().split('\n').slice(-15).join('\n');

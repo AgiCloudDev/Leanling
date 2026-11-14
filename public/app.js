@@ -200,10 +200,14 @@ function containerPanel(r) {
     <label class="field">Porte (una per riga, host:container) <textarea name="ports">${esc((c.ports ?? []).join('\n'))}</textarea></label>
     <label class="field">Volumi (uno per riga) <textarea name="volumes">${esc((c.volumes ?? []).join('\n'))}</textarea></label>
     <label class="field">Limite di memoria (es. 1g, vuoto = nessuno) <input name="memory" value="${esc(c.memory ?? '')}"></label>
-    <label class="field">Rete Docker (vuoto = predefinita) <input name="network" value="${esc(c.network ?? '')}"></label>
+    <label class="field">Limite di CPU (es. 2 o 0.5, vuoto = nessuno) <input name="cpus" value="${esc(c.cpus ?? '')}"></label>
+    <label class="field">Reti Docker (una per riga; "rete:alias1,alias2" per dare altri nomi al container; vuoto = predefinita) <textarea name="networks">${esc([...(c.networks ?? []), ...(c.network ? [c.network] : [])].join('\n'))}</textarea></label>
+    <label class="field">Host in più (uno per riga, nome:indirizzo, es. host.docker.internal:host-gateway) <textarea name="extraHosts">${esc((c.extraHosts ?? []).join('\n'))}</textarea></label>
     <label class="field">Variabili in più (CHIAVE=valore, una per riga) <textarea name="env">${esc(Object.entries(r.containerEnv).map(([k, v]) => `${k}=${v}`).join('\n'))}</textarea></label>
     <label class="check"><input type="checkbox" name="deploy" ${r.deploy ? 'checked' : ''}><span>Installa da solo dopo le prove<small>altrimenti il figlio resta "pronto" finché non premi Installa</small></span></label>
     <label class="check"><input type="checkbox" name="adopt" ${r.adopt ? 'checked' : ''}><span>Adotta il container esistente con questo nome<small>serve per sostituire un'installazione fatta a mano: i volumi restano</small></span></label>
+    <label class="field">Sostituisce questo container (facoltativo)<input name="replaces" value="${esc(r.replaces)}" placeholder="es. app-app-1 creato con compose"><small>all'installazione viene fermato, non cancellato; se il figlio non risponde viene riavviato</small></label>
+    <label class="check"><input type="checkbox" name="dataTest" ${r.dataTest ? 'checked' : ''}><span>Prova il figlio su una copia dei dati<small>copia i volumi esistenti e avvia il figlio senza rete; l'installazione in uso va in pausa pochi secondi durante la copia</small></span></label>
     <label class="field">Pubblica l'immagine dopo l'installazione (facoltativo) <input name="publishAs" value="${esc(r.publishAs)}" placeholder="ghcr.io/utente/nome"></label>
     <div><button>Salva</button></div>`;
   f.addEventListener('submit', async (e) => {
@@ -213,8 +217,8 @@ function containerPanel(r) {
     const env = Object.fromEntries(lines(v.env).filter((l) => l.includes('=')).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
     try {
       await api(`/api/recipes/${r.name}/settings`, {
-        container: { name: v.name, ports: lines(v.ports), volumes: lines(v.volumes), memory: v.memory || undefined, network: v.network || undefined, env },
-        deploy: !!v.deploy, adopt: !!v.adopt, publishAs: v.publishAs.trim(),
+        container: { name: v.name, ports: lines(v.ports), volumes: lines(v.volumes), memory: v.memory || undefined, cpus: v.cpus || undefined, networks: lines(v.networks), extraHosts: lines(v.extraHosts), env },
+        deploy: !!v.deploy, adopt: !!v.adopt, replaces: v.replaces.trim(), dataTest: !!v.dataTest, publishAs: v.publishAs.trim(),
       });
       toast('Salvato');
       await load();

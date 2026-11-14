@@ -22,7 +22,7 @@ const fixture = {
 mkdirSync(join(process.env.LEANLING_HOME, 'recipes', 'prova'), { recursive: true });
 writeFileSync(join(process.env.LEANLING_HOME, 'recipes', 'prova', 'recipe.json'), JSON.stringify(fixture));
 
-const { buildEnv, getRecipe, listRecipes, resolveOptions } = await import('../src/recipes.js');
+const { buildEnv, containerArgs, getRecipe, listRecipes, namedVolumes, parseNetworks, resolveOptions } = await import('../src/recipes.js');
 const { parseVerdict } = await import('../src/agent.js');
 const { cleanOptions, isGit, nameFrom, parseDockerfile } = await import('../src/add.js');
 const settings = (over = {}) => ({ choices: {}, container: {}, extraOptions: [], ...over });
@@ -91,4 +91,36 @@ test('aggiungi: le opzioni proposte dall\'agente vengono filtrate', () => {
   ], notes);
   assert.deepEqual(out.map((o) => o.id), ['tele']);
   assert.equal(notes.length, 4);
+});
+
+test('reti: più reti con alias, senza doppioni, e la vecchia voce singola vale ancora', () => {
+  assert.deepEqual(parseNetworks({ networks: ['a:uno,due', ' b ', 'a'], network: 'c' }), [
+    { name: 'a', aliases: ['uno', 'due'] },
+    { name: 'b', aliases: [] },
+    { name: 'c', aliases: [] },
+  ]);
+  assert.deepEqual(parseNetworks({}), []);
+});
+
+test('volumi: solo quelli con nome si copiano per la prova con i dati', () => {
+  assert.deepEqual(namedVolumes({ volumes: ['dati:/app/data', '/srv/x:/x', './y:/y', 'cfg:/etc/app:ro'] }), [
+    { src: 'dati', dest: '/app/data' },
+    { src: 'cfg', dest: '/etc/app:ro' },
+  ]);
+});
+
+test('container: limiti e host in più; la prova con i dati non pubblica porte né monta i volumi veri', () => {
+  const spec = { ports: ['127.0.0.1:80:80'], volumes: ['dati:/d'], memory: '1g', cpus: '2', extraHosts: ['h:host-gateway'] };
+  assert.deepEqual(containerArgs(spec, { A: '1' }, { l: 'x' }), ['-p', '127.0.0.1:80:80', '-v', 'dati:/d', '-e', 'A=1', '--label', 'l=x', '--memory', '1g', '--cpus', '2', '--add-host', 'h:host-gateway']);
+  assert.deepEqual(containerArgs(spec, {}, {}, { ports: false, volumes: false, hosts: false }), ['--memory', '1g', '--cpus', '2']);
+});
+
+test('guarddog: blocca dal rischio alto, avvisa sotto, e capisce anche il formato vecchio', async () => {
+  const { guarddogVerdict } = await import('../src/scan.js');
+  const pkg = (label, score) => `\x1b[1mAssessment:\x1b[0m  ${label}  (${score}/10)\n`;
+  assert.equal(guarddogVerdict(pkg('No risks detected', '0.0') + pkg('No risks detected', '0.0')).status, 'ok');
+  assert.equal(guarddogVerdict(pkg('No risks detected', '0.0') + pkg('Low risk', '4.3')).status, 'avviso');
+  assert.equal(guarddogVerdict(pkg('Low risk', '4.3') + pkg('High risk', '8.1')).status, 'bloccante');
+  assert.equal(guarddogVerdict('Found 0 potentially malicious indicators').status, 'ok');
+  assert.equal(guarddogVerdict('Found 3 potentially malicious indicators in x').status, 'bloccante');
 });

@@ -68,12 +68,28 @@ Per un aggiornamento automatico basta un cron, per esempio ogni notte:
 0 4 * * *  leanling update uptime-kuma >> ~/.leanling/cron.log 2>&1
 ```
 
+## Prova su una copia dei tuoi dati
+
+Un figlio vuoto che parte non basta: la versione nuova deve partire anche sui *tuoi* dati. Se i volumi dell'installazione esistono già, ogni aggiornamento fa anche questo:
+
+1. copia i volumi con nome (il programma in uso va in pausa solo per i secondi della copia, così i file sono coerenti);
+2. avvia il figlio sulla copia, con le stesse variabili della produzione ma **senza rete**: le migrazioni girano sui dati veri, mentre automazioni, webhook e chiamate in uscita non possono raggiungere nessuno;
+3. esegue i controlli (`dataChecks`, se la ricetta li ha), poi cancella il container e le copie.
+
+I dati veri non vengono mai toccati. La prova si può spegnere per ogni ricetta dalla scheda Contenitore.
+
+## Sostituire un container fatto a mano o con compose
+
+Nella scheda Contenitore, **Sostituisce** è il nome del container esistente (per esempio `app-app-1`). All'installazione Leanling lo ferma senza cancellarlo, avvia il figlio sugli stessi volumi e lo controlla. Se il figlio non risponde, viene tolto e il vecchio container riparte com'era.
+
+Se altri container raggiungono il programma con il vecchio nome, aggiungilo come alias sulla rete: `mia_rete:app-app-1`. Se sul tuo server qualcosa riavvia da solo il vecchio container (uno script di controllo, un `compose up` in cron), spegnilo prima.
+
 ## Dashboard
 
 Ascolta solo su `127.0.0.1`. Se la apri da fuori, mettila dietro un proxy con autenticazione oppure avviala con `LEANLING_TOKEN=un-segreto` e aprila con `?token=un-segreto`.
 
 - **Selezioni**: cosa togliere dal figlio, gruppo per gruppo. Le novità trovate nell'ultima versione compaiono in evidenza: decidi tu se tenerle.
-- **Contenitore**: nome, porte, volumi, limite di memoria, variabili in più, installazione automatica, pubblicazione dell'immagine.
+- **Contenitore**: nome, porte, volumi, limiti di memoria e CPU, una o più reti Docker (con alias), host in più, variabili in più, il container da sostituire, la prova su una copia dei dati, installazione automatica, pubblicazione dell'immagine.
 - **Attività**: passaggi, scanner, revisione dell'agente e registro in diretta, più lo storico.
 - **Impostazioni**: agente, accesso (abbonamento o chiave API), modello, scanner, versioni da tenere.
 
@@ -115,6 +131,7 @@ Le tue ricette restano sulla tua macchina: la repo di Leanling contiene solo il 
 - `type: "image"`: parte da un'immagine ufficiale (`image`, `tag`). Le `options` diventano variabili d'ambiente: `env` per i valori singoli, `list` per le liste separate da virgola. `discover` può leggere dall'immagine l'elenco di ciò che esiste, così le novità si vedono subito;
 - `type: "build"`: parte da un repo git (`repo`, `ref`) e applica le `patches` (file `.patch` con un `intent` in parole semplici, che serve all'agente per rifarle). `maxSizeMB` ferma l'aggiornamento se l'immagine torna a pesare troppo;
 - `test`: porta interna e controlli HTTP (`status`, `json`, `contains`) da superare prima dell'installazione;
+  `dataChecks` (facoltativo) sono i controlli usati quando il figlio parte su dati esistenti, per esempio una pagina che dimostra che i tuoi dati ci sono.
 - `container`: valori predefiniti per il container installato, modificabili dalla dashboard.
 
 Regole per le ricette:
