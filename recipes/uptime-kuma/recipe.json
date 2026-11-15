@@ -1,7 +1,7 @@
 {
   "name": "uptime-kuma",
   "title": "Uptime Kuma",
-  "description": "Esempio di ricetta: monitoraggio di siti e servizi. Usa l'immagine ufficiale senza modificarla e mostra il formato delle opzioni, del test e del contenitore.",
+  "description": "Example recipe: monitoring of websites and services. It uses the official image unchanged and shows the format of options, test and container.",
   "type": "image",
   "image": "louislam/uptime-kuma",
   "tag": "1",
@@ -20,6 +20,6 @@
     "env": {}
   },
   "options": [
-    { "id": "node-memory", "group": "Risorse", "label": "Limita la memoria di Node a 256 MB", "default": false, "env": { "NODE_OPTIONS": "--max-old-space-size=256" } }
+    { "id": "node-memory", "group": "Resources", "label": "Limit Node memory to 256 MB", "default": false, "env": { "NODE_OPTIONS": "--max-old-space-size=256" } }
   ]
 }

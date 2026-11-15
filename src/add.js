@@ -1,22 +1,22 @@
-// "Aggiungi programma": da un URL git o da un'immagine Docker a una ricetta pronta da rivedere.
+// "Add app": from a git URL or a Docker image to a recipe ready to be reviewed.
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { agentStatus, askAgent } from './agent.js';
-import { HOME, loadConfig } from './config.js';
+import { HOME, languageName, loadConfig } from './config.js';
 import { finish, logger, newRun, step } from './pipeline.js';
 import { listRecipes, NAME, writeRecipe } from './recipes.js';
 import { run } from './sh.js';
 
 export const isGit = (src) => /^(https?:\/\/|git@)/.test(src) || src.endsWith('.git');
 
-/** Nome della ricetta dall'URL o dall'immagine: ultimo pezzo, minuscolo, senza tag */
+/** Recipe name from the URL or the image: last segment, lowercase, without the tag */
 export function nameFrom(src) {
   const last = src.replace(/\.git$/, '').replace(/\/+$/, '').split(/[/:]/).filter(Boolean);
   const base = isGit(src) ? last.at(-1) : src.replace(/[:@][^/]*$/, '').split('/').at(-1);
-  return (base ?? 'programma').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'programma';
+  return (base ?? 'app').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'app';
 }
 
-/** Porta, percorso del controllo di salute e volumi letti da un Dockerfile */
+/** Port, health-check path and volumes read from a Dockerfile */
 export function parseDockerfile(text) {
   const port = Number(text.match(/^\s*EXPOSE\s+(\d+)/im)?.[1]) || null;
   const hc = text.match(/^\s*HEALTHCHECK[\s\S]*?(?:\n(?!\s)|$)/im)?.[0] ?? '';
@@ -27,47 +27,47 @@ export function parseDockerfile(text) {
 
 const guessLicense = (dir) => {
   const f = readdirSync(dir).find((x) => /^licen[sc]e(\.md|\.txt)?$/i.test(x));
-  if (!f) return 'Licenza non trovata: controllala prima di usarlo';
+  if (!f) return 'Licence not found: check it before using the app';
   const t = readFileSync(join(dir, f), 'utf8').slice(0, 3000);
-  for (const [re, name] of [[/Sustainable Use License/i, 'Sustainable Use License (uso interno o non commerciale)'], [/GNU AFFERO/i, 'AGPL-3.0'], [/GNU GENERAL PUBLIC LICENSE/i, 'GPL'], [/GNU LESSER/i, 'LGPL'], [/Apache License/i, 'Apache-2.0'], [/MIT License|Permission is hereby granted, free of charge/i, 'MIT'], [/Business Source License/i, 'Business Source License (non open source)'], [/Elastic License/i, 'Elastic License (non open source)'], [/BSD/i, 'BSD']]) {
+  for (const [re, name] of [[/Sustainable Use License/i, 'Sustainable Use License (internal or non-commercial use)'], [/GNU AFFERO/i, 'AGPL-3.0'], [/GNU GENERAL PUBLIC LICENSE/i, 'GPL'], [/GNU LESSER/i, 'LGPL'], [/Apache License/i, 'Apache-2.0'], [/MIT License|Permission is hereby granted, free of charge/i, 'MIT'], [/Business Source License/i, 'Business Source License (non open source)'], [/Elastic License/i, 'Elastic License (non open source)'], [/BSD/i, 'BSD']]) {
     if (re.test(t)) return name;
   }
-  return `Licenza in ${f}: leggila prima di usarlo`;
+  return `Licence in ${f}: read it before using the app`;
 };
 
 const MANIFESTS = ['requirements.txt', 'package.json', 'package-lock.json'];
 
 /**
- * Crea la ricetta e, se c'e' un agente, gli fa proporre opzioni e patch.
- * La ricetta finisce in ~/.leanling/recipes: niente di personale nella repo di Leanling.
+ * Creates the recipe and, when an agent is available, has it propose options and patches.
+ * The recipe goes into ~/.leanling/recipes: nothing personal ends up in the Leanling repository.
  */
 export async function addRecipe(src, { name, analyze = true, echo = false } = {}) {
   src = src.trim();
   name = (name || nameFrom(src)).toLowerCase();
-  if (!NAME.test(name)) throw new Error(`Nome non valido: ${name} (minuscole, numeri e trattini)`);
-  if (listRecipes().some((r) => r.name === name)) throw new Error(`Esiste già una ricetta "${name}": scegli un altro nome`);
+  if (!NAME.test(name)) throw new Error(`Invalid name: ${name} (lowercase letters, numbers and hyphens)`);
+  if (listRecipes().some((r) => r.name === name)) throw new Error(`A recipe named "${name}" already exists: pick another name`);
 
-  const r = newRun(name, 'aggiungi');
+  const r = newRun(name, 'add');
   const log = logger(r, echo);
-  const work = join(HOME, 'work', name, 'analisi');
+  const work = join(HOME, 'work', name, 'analysis');
   try {
     const cfg = loadConfig();
     let recipe;
-    let srcDir = null; // sorgente da far leggere all'agente
+    let srcDir = null; // source for the agent to read
 
     if (isGit(src)) {
-      recipe = await step(r, log, 'Scarico il progetto', async () => {
+      recipe = await step(r, log, 'Downloading the project', async () => {
         rmSync(work, { recursive: true, force: true });
         const c = await run('git', ['clone', '--depth', '1', src, work]);
         if (c.code !== 0) throw new Error(c.err.trim());
         const ref = (await run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: work })).out.trim() || 'main';
         const dockerfile = ['Dockerfile', 'docker/Dockerfile', 'Dockerfile.prod', 'deploy/Dockerfile', 'build/Dockerfile'].find((f) => existsSync(join(work, f)));
-        if (!dockerfile) throw new Error('Nel progetto non c\'è un Dockerfile. Per ora Leanling costruisce solo progetti con un Dockerfile: se esiste un\'immagine ufficiale, aggiungi quella.');
+        if (!dockerfile) throw new Error('The project has no Dockerfile. For now Leanling only builds projects with a Dockerfile: if an official image exists, add that instead.');
         const d = parseDockerfile(readFileSync(join(work, dockerfile), 'utf8'));
         srcDir = work;
         return {
-          status: d.port ? 'ok' : 'avviso',
-          detail: `ramo ${ref}, ${dockerfile}${d.port ? `, porta ${d.port}` : ', nessuna porta dichiarata (EXPOSE): impostala tu'}`,
+          status: d.port ? 'ok' : 'warning',
+          detail: `branch ${ref}, ${dockerfile}${d.port ? `, port ${d.port}` : ', no declared port (EXPOSE): set it yourself'}`,
           recipe: {
             name, title: name, type: 'build', repo: src, ref, upstream: src.replace(/\.git$/, ''), dockerfile,
             license: guessLicense(work),
@@ -77,7 +77,7 @@ export async function addRecipe(src, { name, analyze = true, echo = false } = {}
         };
       }).then((x) => x.recipe);
     } else {
-      recipe = await step(r, log, 'Scarico l\'immagine', async () => {
+      recipe = await step(r, log, 'Pulling the image', async () => {
         const ref = src.includes(':') && !src.endsWith(':') ? src : `${src}:latest`;
         const p = await run('docker', ['pull', '-q', ref]);
         if (p.code !== 0) throw new Error(p.err.trim());
@@ -89,17 +89,17 @@ export async function addRecipe(src, { name, analyze = true, echo = false } = {}
         const upstream = labels['org.opencontainers.image.source'] ?? '';
         const [image, tag] = [ref.slice(0, ref.lastIndexOf(':')), ref.slice(ref.lastIndexOf(':') + 1)];
         return {
-          status: port ? 'ok' : 'avviso',
-          detail: `${ref}${port ? `, porta ${port}` : ', nessuna porta dichiarata: impostala tu'}`,
+          status: port ? 'ok' : 'warning',
+          detail: `${ref}${port ? `, port ${port}` : ', no declared port: set it yourself'}`,
           recipe: {
             name, title: labels['org.opencontainers.image.title'] || name, type: 'image', image, tag, upstream,
-            license: labels['org.opencontainers.image.licenses'] || 'Licenza non dichiarata nell\'immagine: controllala',
+            license: labels['org.opencontainers.image.licenses'] || 'Licence not declared in the image: check it',
             ...baseParts(name, { port, path, volumes: Object.keys(info.Volumes ?? {}) }),
           },
         };
       }).then((x) => x.recipe);
 
-      // Per l'analisi serve il sorgente: se l'immagine dice da dove viene, lo scarico
+      // The analysis needs the source: if the image says where it comes from, download it
       if (analyze && /^https:\/\/github\.com\//.test(recipe.upstream)) {
         rmSync(work, { recursive: true, force: true });
         const c = await run('git', ['clone', '--depth', '1', recipe.upstream, work]);
@@ -108,10 +108,10 @@ export async function addRecipe(src, { name, analyze = true, echo = false } = {}
     }
 
     writeRecipe(recipe);
-    log(`ricetta di base salvata in ${join(HOME, 'recipes', name)}`);
+    log(`base recipe saved in ${join(HOME, 'recipes', name)}`);
 
     if (analyze && agentStatus(cfg).ready && srcDir) {
-      await step(r, log, 'Analisi dell\'agente', async () => {
+      await step(r, log, 'Agent analysis', async () => {
         const proposal = await analyzeWithAgent(cfg, recipe, srcDir, log);
         const notes = [];
         recipe.description = proposal.description || recipe.description;
@@ -123,15 +123,15 @@ export async function addRecipe(src, { name, analyze = true, echo = false } = {}
         if (Number(proposal.test?.port)) recipe.test.port = Number(proposal.test.port);
         if (notes.length) recipe.notes = [recipe.notes, ...notes].filter(Boolean).join('\n');
         writeRecipe(recipe);
-        return { status: notes.length ? 'avviso' : 'ok', detail: `${recipe.options.length} opzioni, ${recipe.patches?.length ?? 0} patch proposte${notes.length ? `; ${notes.length} scartate` : ''}` };
+        return { status: notes.length ? 'warning' : 'ok', detail: `${recipe.options.length} options, ${recipe.patches?.length ?? 0} patches proposed${notes.length ? `; ${notes.length} discarded` : ''}` };
       });
     } else if (analyze) {
-      r.steps.push({ name: 'Analisi dell\'agente', status: 'saltato', detail: agentStatus(cfg).ready ? 'sorgente non disponibile' : agentStatus(cfg).reason });
+      r.steps.push({ name: 'Agent analysis', status: 'skipped', detail: agentStatus(cfg).ready ? 'source not available' : agentStatus(cfg).reason });
     }
-    return finish(r, 'ok', `Ricetta "${name}" creata: controlla le Selezioni e il Contenitore, poi prepara il figlio`);
+    return finish(r, 'ok', `Recipe "${name}" created: check Choices and Container, then prepare the child`);
   } catch (e) {
     log(`✖ ${e.message}`);
-    return finish(r, 'errore', e.message.split('\n')[0]);
+    return finish(r, 'error', e.message.split('\n')[0]);
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
@@ -139,11 +139,11 @@ export async function addRecipe(src, { name, analyze = true, echo = false } = {}
 
 function baseParts(name, { port, path, volumes }) {
   return {
-    description: 'Ricetta creata da Leanling: rivedi le opzioni prima di preparare il figlio.',
+    description: 'Recipe created by Leanling: review the options before preparing the child.',
     test: { port: port ?? 80, startTimeout: 180, checks: [{ method: 'GET', path: path ?? '/', ok: true }] },
     container: {
       name,
-      // Porte basse (80, 443…) spesso sono gia' del proxy: sull'host se ne propone una alta
+      // Low ports (80, 443…) usually belong to the proxy already: a high one is proposed on the host
       ports: port ? [`127.0.0.1:${port < 1024 ? 8000 + port : port}:${port}`] : [],
       volumes: (volumes ?? []).map((v, i) => `${name}-data${i || ''}:${v}`),
       env: {},
@@ -154,61 +154,64 @@ function baseParts(name, { port, path, volumes }) {
 }
 
 async function analyzeWithAgent(cfg, recipe, dir, log) {
-  const prompt = `Stai preparando una "ricetta" Leanling per ${recipe.title} (${recipe.upstream || recipe.image}), installato in self-hosted da una persona sola o da un freelancer, senza licenze a pagamento. Il sorgente è nella cartella corrente: leggilo, non eseguire nulla.
+  const language = languageName(cfg);
+  const prompt = `You are preparing a Leanling "recipe" for ${recipe.title} (${recipe.upstream || recipe.image}), self-hosted by a single person or a freelancer, without paid licences. The source is in the current folder: read it, do not run anything.
 
-Obiettivo: un figlio snello, con solo quello che funziona in self-hosted gratuito, aggiornabile senza perdere le modifiche.
+Goal: a lean child, with only what works in free self-hosting, that can be updated without losing the changes.
 
-Regole:
-- Le opzioni devono usare SOLO interruttori ufficiali del programma (variabili d'ambiente documentate o lette dal codice). Indica per ognuna la variabile esatta.
-- Spegni (default true) telemetria, funzioni che richiedono una licenza a pagamento o un servizio cloud del produttore, banner promozionali. Lascia accese (default false) le funzioni utili free.
-- Non proporre MAI di sbloccare funzioni a pagamento, togliere controlli di licenza, modificare file di licenza o copyright, o toccare codice sotto licenza commerciale (cartelle o file "ee", "enterprise", "premium").
-- Le patch sono solo per il Dockerfile o gli script di build, e solo se portano un vantaggio chiaro (immagine più leggera, layer duplicati, permessi). Ogni patch è un diff unificato applicabile con "git apply" dalla radice del progetto. Se non serve nessuna patch, lista vuota.
-- Se non trovi interruttori ufficiali, lista vuota: meglio niente che opzioni inventate.
+Rules:
+- Options must use ONLY official switches of the app (environment variables that are documented or read by the code). Give the exact variable for each one.
+- Turn off (default true) telemetry, features that need a paid licence or a cloud service of the vendor, promotional banners. Leave on (default false) the useful free features.
+- NEVER propose to unlock paid features, remove licence checks, change licence or copyright files, or touch code under a commercial licence ("ee", "enterprise", "premium" folders or files).
+- Patches are only for the Dockerfile or the build scripts, and only when they bring a clear benefit (lighter image, duplicated layers, permissions). Every patch is a unified diff that applies with "git apply" from the project root. If no patch is needed, empty list.
+- If you find no official switches, empty list: nothing is better than invented options.
 
-Rispondi con UN SOLO blocco \`\`\`json, con questa forma:
+Write every text meant for the user (description, labels, notes) in ${language}. Keep the option groups exactly as named below.
+
+Reply with ONE SINGLE \`\`\`json block, shaped like this:
 {
-  "title": "nome leggibile",
-  "description": "una frase in italiano: cosa fa il programma e cosa toglie il figlio",
-  "test": { "port": 1234, "path": "/percorso-di-salute" },
+  "title": "readable name",
+  "description": "one sentence: what the app does and what the child removes",
+  "test": { "port": 1234, "path": "/health-path" },
   "options": [
-    { "id": "breve-id", "group": "Telemetria | A pagamento | Funzioni facoltative | Risorse", "label": "testo in italiano", "default": true, "env": { "VARIABILE": "valore" } }
+    { "id": "short-id", "group": "Telemetry | Paid features | Optional features | Resources", "label": "short text", "default": true, "env": { "VARIABLE": "value" } }
   ],
   "patches": [
-    { "file": "01-nome.patch", "label": "cosa fa, in italiano", "intent": "scopo in parole semplici, serve per rifarla se il file cambia", "diff": "diff --git a/Dockerfile b/Dockerfile\\n..." }
+    { "file": "01-name.patch", "label": "what it does", "intent": "purpose in plain words, needed to redo it if the file changes", "diff": "diff --git a/Dockerfile b/Dockerfile\\n..." }
   ],
-  "notes": "cose che l'utente deve sapere: licenza, limiti, cosa hai lasciato fuori e perché"
+  "notes": "what the user must know: licence, limits, what you left out and why"
 }
-Per le variabili che sono liste separate da virgola usa "list": { "VARIABILE": "elemento" } al posto di "env".`;
+For variables that are comma-separated lists use "list": { "VARIABLE": "item" } instead of "env".`;
   const text = await askAgent(cfg, prompt, { cwd: dir, log });
   const block = [...text.matchAll(/```json\s*([\s\S]*?)```/g)].pop()?.[1] ?? text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1);
   try {
     return JSON.parse(block);
   } catch {
-    throw new Error('L\'agente non ha restituito un JSON valido: riprova o scrivi la ricetta a mano');
+    throw new Error('The agent did not return valid JSON: try again or write the recipe by hand');
   }
 }
 
-/** Tiene solo opzioni ben formate: id semplice, valori stringa */
+/** Keeps only well-formed options: simple id, string values */
 export function cleanOptions(list, notes) {
   const out = [];
   for (const o of Array.isArray(list) ? list : []) {
     const strMap = (m) => m && typeof m === 'object' && !Array.isArray(m) && Object.entries(m).every(([k, v]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && typeof v === 'string');
     if (!o || !/^[\w.-]{1,60}$/.test(o.id ?? '') || !(strMap(o.env) || strMap(o.list)) || out.some((x) => x.id === o.id)) {
-      notes.push(`opzione scartata: ${JSON.stringify(o).slice(0, 120)}`);
+      notes.push(`option discarded: ${JSON.stringify(o).slice(0, 120)}`);
       continue;
     }
-    out.push({ id: o.id, group: String(o.group ?? 'Altro').slice(0, 60), label: String(o.label ?? o.id).slice(0, 120), default: o.default === true, ...(strMap(o.env) ? { env: o.env } : {}), ...(strMap(o.list) ? { list: o.list } : {}) });
+    out.push({ id: o.id, group: String(o.group ?? 'Other').slice(0, 60), label: String(o.label ?? o.id).slice(0, 120), default: o.default === true, ...(strMap(o.env) ? { env: o.env } : {}), ...(strMap(o.list) ? { list: o.list } : {}) });
   }
   return out;
 }
 
-/** Salva le patch proposte solo se si applicano davvero al sorgente scaricato */
+/** Saves the proposed patches only if they really apply to the downloaded source */
 async function savePatches(recipe, list, dir, notes) {
   const kept = [];
   for (const p of Array.isArray(list) ? list : []) {
-    const file = /^[\w.-]+\.patch$/.test(p?.file ?? '') ? p.file : `${String(kept.length + 1).padStart(2, '0')}-proposta.patch`;
+    const file = /^[\w.-]+\.patch$/.test(p?.file ?? '') ? p.file : `${String(kept.length + 1).padStart(2, '0')}-proposed.patch`;
     if (typeof p?.diff !== 'string' || !p.diff.includes('@@')) {
-      notes.push(`patch scartata (diff mancante): ${p?.label ?? file}`);
+      notes.push(`patch discarded (diff missing): ${p?.label ?? file}`);
       continue;
     }
     const path = join(HOME, 'recipes', recipe.name, 'patches', file);
@@ -216,7 +219,7 @@ async function savePatches(recipe, list, dir, notes) {
     const check = await run('git', ['apply', '--check', path], { cwd: dir });
     if (check.code !== 0) {
       rmSync(path);
-      notes.push(`patch scartata perché non si applica: ${p.label ?? file}`);
+      notes.push(`patch discarded because it does not apply: ${p.label ?? file}`);
       continue;
     }
     kept.push({ file, label: String(p.label ?? file).slice(0, 120), intent: String(p.intent ?? p.label ?? ''), default: false });

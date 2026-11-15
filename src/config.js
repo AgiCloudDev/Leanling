@@ -1,4 +1,4 @@
-// Impostazioni e stato di Leanling, tutto in ~/.leanling (o $LEANLING_HOME).
+// Leanling settings and state, all in ~/.leanling (or $LEANLING_HOME).
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -9,14 +9,15 @@ for (const d of ['', 'work', 'runs', 'patches']) mkdirSync(join(HOME, d), { recu
 const DEFAULTS = {
   agent: {
     type: 'none', // none | claude | opencode
-    auth: 'subscription', // subscription | api (solo Claude Code)
+    auth: 'subscription', // subscription | api (Claude Code only)
     apiKey: '',
     model: '',
-    review: true, // l'agente legge le novita' prima dell'installazione
-    fixPatches: true, // l'agente sistema le patch che non si applicano piu'
+    review: true, // the agent reads what changed before installing
+    fixPatches: true, // the agent redoes patches that no longer apply
   },
   scanners: { osv: true, guarddog: true, gitleaks: true, clamav: false },
-  keepVersions: 2, // versione in uso + precedente
+  keepVersions: 2, // version in use + previous one
+  language: 'en', // language the agent writes in (reviews, recipe texts): follows the dashboard language
   recipes: {},
 };
 
@@ -28,7 +29,7 @@ function readJson(file, fallback) {
   }
 }
 
-// Scrittura atomica: mai un file a meta' se il processo si ferma
+// Atomic write: never a half-written file if the process stops
 function writeJson(file, data, mode = 0o600) {
   writeFileSync(`${file}.tmp`, JSON.stringify(data, null, 2), { mode });
   renameSync(`${file}.tmp`, file);
@@ -50,14 +51,19 @@ export const saveConfig = (cfg) => writeJson(CONFIG, cfg);
 export const loadState = () => readJson(STATE, {});
 export const saveState = (state) => writeJson(STATE, state);
 
-/** Impostazioni dell'utente per una ricetta: scelte, contenitore, cose da pubblicare */
+/** User settings for a recipe: choices, container, what to publish */
 export function recipeSettings(cfg, name) {
   return merge({ choices: {}, container: {}, extraOptions: [], publishAs: '', deploy: false }, cfg.recipes[name]);
 }
 
-/** Configurazione senza segreti, da mostrare nella dashboard */
+/** Configuration without secrets, to show in the dashboard */
 export function publicConfig(cfg) {
   return { ...cfg, agent: { ...cfg.agent, apiKey: cfg.agent.apiKey ? '••••' + cfg.agent.apiKey.slice(-4) : '' } };
 }
 
 export const exists = existsSync;
+
+/** Interface languages; the agent is asked to write in the one the user picked */
+export const LANGUAGES = { en: 'English', it: 'Italian', de: 'German', cs: 'Czech', ru: 'Russian' };
+export const isLanguage = (v) => typeof v === 'string' && Object.hasOwn(LANGUAGES, v);
+export const languageName = (cfg) => LANGUAGES[cfg.language] ?? LANGUAGES.en;

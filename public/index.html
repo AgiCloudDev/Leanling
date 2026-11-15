@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="it">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -11,69 +11,74 @@
   <header>
     <div class="brand"><img src="logo.svg" alt="" width="28" height="28"><span>Leanling</span></div>
     <p class="tagline">Keep the child, skip the bloat.</p>
-    <button id="open-settings" class="ghost">Impostazioni</button>
+    <button id="open-settings" class="ghost" data-t="impostazioniBtn"></button>
   </header>
 
   <div class="layout">
     <div class="side">
-      <nav id="recipes" aria-label="Ricette"></nav>
-      <button id="open-add" class="ghost add">+ Aggiungi programma</button>
+      <nav id="recipes"></nav>
+      <button id="open-add" class="ghost add" data-t="aggiungiBtn"></button>
     </div>
 
     <main id="main">
-      <p class="empty">Caricamento…</p>
+      <p class="empty" data-t="caricamento"></p>
     </main>
   </div>
 
   <dialog id="settings">
     <form method="dialog" id="settings-form">
-      <h2>Impostazioni</h2>
+      <h2 data-t="dlgImpTitolo"></h2>
 
       <fieldset>
-        <legend>Agente</legend>
-        <p class="hint">Interviene solo quando serve: legge le novità prima dell'installazione e rifà le patch che non si applicano più.</p>
-        <label class="radio"><input type="radio" name="agentType" value="none"> Nessuno</label>
-        <label class="radio"><input type="radio" name="agentType" value="claude"> Claude Code</label>
-        <label class="radio"><input type="radio" name="agentType" value="opencode"> OpenCode</label>
+        <legend data-t="dlgAgente"></legend>
+        <p class="hint" data-t="dlgAgenteHint"></p>
+        <label class="radio"><input type="radio" name="agentType" value="none"> <span data-t="agNone"></span></label>
+        <label class="radio"><input type="radio" name="agentType" value="claude"> <span data-t="agClaude"></span></label>
+        <label class="radio"><input type="radio" name="agentType" value="opencode"> <span data-t="agOpencode"></span></label>
         <div class="when-claude">
-          <label class="radio"><input type="radio" name="agentAuth" value="subscription"> Abbonamento (claude login)</label>
-          <label class="radio"><input type="radio" name="agentAuth" value="api"> Chiave API (a consumo)</label>
-          <label class="field when-api">Chiave API <input type="password" name="apiKey" autocomplete="off" placeholder="sk-ant-…"></label>
+          <label class="radio"><input type="radio" name="agentAuth" value="subscription"> <span data-t="agSub"></span></label>
+          <label class="radio"><input type="radio" name="agentAuth" value="api"> <span data-t="agApi"></span></label>
+          <label class="field when-api"><span data-t="agKey"></span> <input type="password" name="apiKey" autocomplete="off" placeholder="sk-ant-…"></label>
         </div>
-        <label class="field">Modello <input name="model" placeholder="predefinito dell'agente"></label>
-        <label class="check"><input type="checkbox" name="review"> Revisione delle novità prima di installare</label>
-        <label class="check"><input type="checkbox" name="fixPatches"> Rifai le patch che non si applicano più</label>
+        <label class="field"><span data-t="agModello"></span> <input name="model" data-t-placeholder="agModelloPh"></label>
+        <label class="check"><input type="checkbox" name="review"> <span data-t="agReview"></span></label>
+        <label class="check"><input type="checkbox" name="fixPatches"> <span data-t="agFixPatches"></span></label>
         <p class="status" id="agent-status"></p>
       </fieldset>
 
       <fieldset>
-        <legend>Scanner</legend>
+        <legend data-t="dlgScanner"></legend>
         <div id="scanners"></div>
       </fieldset>
 
       <fieldset>
-        <legend>Disco</legend>
-        <label class="field">Versioni da tenere per ricetta <input type="number" name="keepVersions" min="1" max="5"></label>
+        <legend data-t="dlgDisco"></legend>
+        <label class="field"><span data-t="dlgKeep"></span> <input type="number" name="keepVersions" min="1" max="5"></label>
+      </fieldset>
+
+      <fieldset>
+        <legend data-t="dlgLingua"></legend>
+        <select name="language" id="language"></select>
       </fieldset>
 
       <menu>
-        <button value="cancel" class="ghost">Chiudi</button>
-        <button value="save" id="save-settings">Salva</button>
+        <button value="cancel" class="ghost" data-t="chiudiBtn"></button>
+        <button value="save" id="save-settings" data-t="salvaBtn"></button>
       </menu>
     </form>
   </dialog>
 
   <dialog id="add">
     <form method="dialog" id="add-form">
-      <h2>Aggiungi programma</h2>
-      <p class="hint">Indirizzo della repo git (con un Dockerfile) oppure nome dell'immagine Docker ufficiale.</p>
-      <label class="field">Repo o immagine <input name="source" required placeholder="https://github.com/autore/progetto  oppure  autore/immagine:tag"></label>
-      <label class="field">Nome della ricetta (facoltativo) <input name="name" pattern="[a-z0-9][a-z0-9-]*" placeholder="dal nome del progetto"></label>
-      <label class="check"><input type="checkbox" name="analyze" checked><span>Fai analizzare il progetto all'agente<small>propone interruttori ufficiali per telemetria e funzioni a pagamento, e patch al Dockerfile. Tutto spento finché non lo scegli tu.</small></span></label>
+      <h2 data-t="dlgAggTitolo"></h2>
+      <p class="hint" data-t="dlgAggHint"></p>
+      <label class="field"><span data-t="dlgSource"></span> <input name="source" required data-t-placeholder="srcPh"></label>
+      <label class="field"><span data-t="dlgName"></span> <input name="name" pattern="[a-z0-9][a-z0-9-]*" data-t-placeholder="dlgNamePh"></label>
+      <label class="check"><input type="checkbox" name="analyze" checked><span><span data-t="dlgAnalyze"></span><small data-t="dlgAnalyzeHint"></small></span></label>
       <p class="status" id="add-agent"></p>
       <menu>
-        <button value="cancel" class="ghost" formnovalidate>Annulla</button>
-        <button value="add">Aggiungi</button>
+        <button value="cancel" class="ghost" formnovalidate data-t="annullaBtn"></button>
+        <button value="add" data-t="aggiungiSubmit"></button>
       </menu>
     </form>
   </dialog>
@@ -86,18 +91,18 @@
           <p class="desc"></p>
         </div>
         <div class="actions">
-          <button data-act="update">Cerca aggiornamenti e prepara</button>
-          <button data-act="install" class="ok">Installa il figlio pronto</button>
-          <button data-act="rollback" class="ghost">Torna alla precedente</button>
-          <button data-act="clean" class="ghost">Pulisci</button>
+          <button data-act="update" data-t="actUpdate"></button>
+          <button data-act="install" class="ok" data-t="actInstall"></button>
+          <button data-act="rollback" class="ghost" data-t="actRollback"></button>
+          <button data-act="clean" class="ghost" data-t="actClean"></button>
         </div>
       </div>
       <div class="versions"></div>
       <div class="tabs" role="tablist">
-        <button role="tab" data-tab="choices" aria-selected="true">Selezioni</button>
-        <button role="tab" data-tab="container">Contenitore</button>
-        <button role="tab" data-tab="activity">Attività</button>
-        <button role="tab" data-tab="info">Licenza e origine</button>
+        <button role="tab" data-tab="choices" aria-selected="true" data-t="tabChoices"></button>
+        <button role="tab" data-tab="container" data-t="tabContainer"></button>
+        <button role="tab" data-tab="activity" data-t="tabActivity"></button>
+        <button role="tab" data-tab="info" data-t="tabInfo"></button>
       </div>
       <div class="tab" data-panel="choices"></div>
       <div class="tab" data-panel="container" hidden></div>
@@ -106,7 +111,7 @@
     </section>
   </template>
 
-  <footer>Realizzato con <a href="https://agicloud.dev">AgiCloud</a> e Claude Code, per l'amore delle VPS leggere e in salute.</footer>
+  <footer id="footer"></footer>
   <script type="module" src="app.js"></script>
 </body>
 </html>

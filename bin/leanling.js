@@ -7,32 +7,32 @@ import { listRecipes, removeRecipe } from '../src/recipes.js';
 import { scannerStatus } from '../src/scan.js';
 import { startServer } from '../src/server.js';
 
-const HELP = `Leanling: figli snelli dei programmi self-hosted
+const HELP = `Leanling: lean children of self-hosted apps
 
-  leanling list                      ricette disponibili e versione in uso
-  leanling add <url-git|immagine>    crea una ricetta nuova (--name nome, --no-agent)
-  leanling remove <ricetta>          toglie una ricetta creata da te
-  leanling update <ricetta>          prepara e prova il figlio della nuova versione
-        --force                      rifallo anche se la versione non è cambiata
-        --deploy                     se le prove passano, installalo subito
-  leanling install <ricetta>         installa il figlio pronto
-  leanling rollback <ricetta>        torna alla versione precedente
-  leanling clean <ricetta>           toglie le immagini vecchie (--build-cache: anche la cache di Docker)
-  leanling doctor                    agente e scanner disponibili
-  leanling agent <none|claude|opencode> [--api]   sceglie l'agente (--api: Claude Code con chiave API)
-  leanling dashboard [--port 7878]   apre la dashboard su 127.0.0.1
+  leanling list                      available recipes and version in use
+  leanling add <git-url|image>       create a new recipe (--name name, --no-agent)
+  leanling remove <recipe>           remove a recipe you created
+  leanling update <recipe>           prepare and test the child of the new version
+        --force                      redo it even if the version has not changed
+        --deploy                     if the tests pass, install it right away
+  leanling install <recipe>          install the ready child
+  leanling rollback <recipe>         go back to the previous version
+  leanling clean <recipe>            remove old images (--build-cache: Docker build cache too)
+  leanling doctor                    available agent and scanners
+  leanling agent <none|claude|opencode> [--api]   pick the agent (--api: Claude Code with an API key)
+  leanling dashboard [--port 7878]   open the dashboard on 127.0.0.1
 `;
 
 const [cmd, name, ...rest] = process.argv.slice(2);
 const flag = (f) => rest.includes(f) || name === f;
-const exitWith = (r) => process.exit(r.status === 'errore' ? 1 : 0);
+const exitWith = (r) => process.exit(r.status === 'error' ? 1 : 0);
 
 switch (cmd) {
   case 'list': {
     const state = loadState();
     for (const r of listRecipes()) {
       const s = state[r.name] ?? {};
-      console.log(`${r.name.padEnd(14)} ${(s.current?.version ?? '-').padEnd(12)} ${s.candidate ? `pronto: ${s.candidate.version}` : ''}`);
+      console.log(`${r.name.padEnd(14)} ${(s.current?.version ?? '-').padEnd(12)} ${s.candidate ? `ready: ${s.candidate.version}` : ''}`);
     }
     break;
   }
@@ -43,7 +43,7 @@ switch (cmd) {
   }
   case 'remove':
     removeRecipe(need(name));
-    console.log(`Ricetta ${name} tolta (le immagini restano: leanling clean prima di toglierla, se vuoi liberare spazio)`);
+    console.log(`Recipe ${name} removed (images stay: run leanling clean before removing it if you want to free space)`);
     break;
   case 'update':
     exitWith(await update(need(name), { force: flag('--force'), deploy: flag('--deploy'), echo: true }));
@@ -60,14 +60,14 @@ switch (cmd) {
   case 'doctor': {
     const cfg = loadConfig();
     const a = agentStatus(cfg);
-    console.log(`agente: ${a.ready ? 'pronto' : 'non attivo'} (${a.reason})`);
+    console.log(`agent: ${a.ready ? 'ready' : 'not active'} (${a.reason})`);
     for (const [id, s] of Object.entries(scannerStatus(cfg))) {
-      console.log(`${id.padEnd(9)} ${s.installed ? 'installato' : 'manca     '} ${s.enabled ? 'attivo' : 'spento'}  ${s.what}${s.installed ? '' : `  → ${s.install}`}`);
+      console.log(`${id.padEnd(9)} ${s.installed ? 'installed' : 'missing  '} ${s.enabled ? 'on ' : 'off'}  ${s.what}${s.installed ? '' : `  → ${s.install}`}`);
     }
     break;
   }
   case 'agent': {
-    if (!['none', 'claude', 'opencode'].includes(name)) die('Agente: none, claude o opencode');
+    if (!['none', 'claude', 'opencode'].includes(name)) die('Agent: none, claude or opencode');
     const cfg = loadConfig();
     cfg.agent.type = name;
     cfg.agent.auth = flag('--api') ? 'api' : 'subscription';
@@ -87,7 +87,7 @@ switch (cmd) {
 }
 
 function need(n) {
-  if (!n || n.startsWith('--')) die('Manca il nome della ricetta (leanling list)');
+  if (!n || n.startsWith('--')) die('Recipe name missing (leanling list)');
   return n;
 }
 

@@ -1,4 +1,4 @@
-// Ricette: quelle incluse in recipes/ piu' quelle dell'utente in ~/.leanling/recipes.
+// Recipes: the ones bundled in recipes/ plus the user's own in ~/.leanling/recipes.
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,11 +24,11 @@ export function listRecipes() {
 
 export function getRecipe(name) {
   const r = listRecipes().find((x) => x.name === name);
-  if (!r) throw new Error(`Ricetta sconosciuta: ${name}`);
+  if (!r) throw new Error(`Unknown recipe: ${name}`);
   return r;
 }
 
-/** Opzioni della ricetta + quelle aggiunte dall'utente, con la scelta attuale (true = togli) */
+/** Recipe options + the ones added by the user, with the current choice (true = remove) */
 export function resolveOptions(recipe, settings) {
   return [...(recipe.options ?? []), ...settings.extraOptions].map((o) => ({
     ...o,
@@ -36,7 +36,7 @@ export function resolveOptions(recipe, settings) {
   }));
 }
 
-/** Patch attive: una patch corretta dall'agente (in ~/.leanling/patches) ha la precedenza su quella della ricetta */
+/** Active patches: a patch redone by the agent (in ~/.leanling/patches) takes precedence over the recipe's one */
 export function resolvePatches(recipe, settings) {
   return (recipe.patches ?? [])
     .map((p) => {
@@ -46,9 +46,9 @@ export function resolvePatches(recipe, settings) {
 }
 
 /**
- * Variabili d'ambiente del figlio: base del contenitore + opzioni scelte.
- * Le voci `list` si uniscono con la virgola; `available` (se noto) scarta i nomi che la versione non ha piu',
- * cosi' un modulo rimosso dagli autori non impedisce l'avvio.
+ * Environment variables of the child: container base + chosen options.
+ * `list` entries are joined with a comma; `available` (when known) drops the names the version no longer has,
+ * so a module removed upstream does not prevent startup.
  */
 export function buildEnv(recipe, settings, available) {
   const env = { ...(recipe.container?.env ?? {}), ...(settings.container.env ?? {}) };
@@ -69,7 +69,7 @@ export function containerSpec(recipe, settings) {
   return { ...recipe.container, ...Object.fromEntries(Object.entries(settings.container).filter(([k]) => k !== 'env')) };
 }
 
-/** Reti del container: `networks` (una o piu', "rete" oppure "rete:alias1,alias2") piu' la vecchia voce singola `network` */
+/** Container networks: `networks` (one or more, "net" or "net:alias1,alias2") plus the legacy single `network` entry */
 export function parseNetworks(spec) {
   const seen = new Set();
   return [...(spec.networks ?? []), ...(spec.network ? [spec.network] : [])]
@@ -82,7 +82,7 @@ export function parseNetworks(spec) {
     .filter((n) => n.name && !seen.has(n.name) && seen.add(n.name));
 }
 
-/** Volumi con nome ("dati:/percorso"); i percorsi della macchina ("/srv/x:/percorso") restano fuori */
+/** Named volumes ("data:/path"); host paths ("/srv/x:/path") are left out */
 export function namedVolumes(spec) {
   return (spec.volumes ?? [])
     .map((v) => String(v).split(':'))
@@ -90,7 +90,7 @@ export function namedVolumes(spec) {
     .map(([src, ...rest]) => ({ src, dest: rest.join(':') }));
 }
 
-/** Argomenti di `docker create/run` che non dipendono dalla rete: porte, volumi, variabili, etichette, limiti */
+/** `docker create/run` arguments that do not depend on the network: ports, volumes, variables, labels, limits */
 export function containerArgs(spec, env, labels = {}, { ports = true, volumes = true, hosts = true } = {}) {
   const args = [];
   if (ports) for (const p of spec.ports ?? []) args.push('-p', p);
@@ -103,7 +103,7 @@ export function containerArgs(spec, env, labels = {}, { ports = true, volumes = 
   return args;
 }
 
-/** Salva una ricetta dell'utente in ~/.leanling/recipes/<nome> */
+/** Saves a user recipe in ~/.leanling/recipes/<name> */
 export function writeRecipe(recipe) {
   const dir = join(USER, recipe.name);
   mkdirSync(join(dir, 'patches'), { recursive: true });
@@ -112,9 +112,9 @@ export function writeRecipe(recipe) {
   return dir;
 }
 
-/** Toglie una ricetta dell'utente (quelle incluse in Leanling non si cancellano) */
+/** Removes a user recipe (the ones bundled with Leanling cannot be deleted) */
 export function removeRecipe(name) {
   const r = getRecipe(name);
-  if (!r.user) throw new Error('Le ricette incluse in Leanling non si possono togliere');
+  if (!r.user) throw new Error('Recipes bundled with Leanling cannot be removed');
   rmSync(r.dir, { recursive: true, force: true });
 }

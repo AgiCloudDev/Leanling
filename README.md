@@ -30,7 +30,7 @@ leanling update <recipe>
 
 The agent works only when it is needed. It can be Claude Code (subscription or API key) or OpenCode.
 
-- **Review**: it reads the new commits or release notes and ends with `VERDETTO: OK` or `VERDETTO: SOSPETTO` (Italian for "verdict: OK / suspicious"). If the verdict is suspicious, the update stops.
+- **Review**: it reads the new commits or release notes and ends with `VERDICT: OK` or `VERDICT: SUSPICIOUS`. If the verdict is suspicious, the update stops.
 - **Patches**: if a patch no longer applies because upstream changed the file, the agent rewrites it on the new version. The rewritten patch is saved separately so you can review it.
 
 Leanling also works without an agent. If a patch fails, it stops and tells you.
@@ -106,7 +106,7 @@ It has four sections:
 
 Settings and state live in `~/.leanling` (or in `$LEANLING_HOME`). The API key is stored with `600` permissions.
 
-The interface is in Italian for now.
+The interface follows your browser language (English, Italian, German, Czech, Russian) and can be changed in Settings; logs and command-line output are in English. The agent writes its reviews in the language of the interface.
 
 ## Add an app
 

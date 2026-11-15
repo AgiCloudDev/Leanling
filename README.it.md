@@ -20,7 +20,7 @@ leanling update <ricetta>
 ```
 
 L'agente (Claude Code con abbonamento o chiave API, oppure OpenCode) lavora solo quando serve:
-- **revisione**: legge i commit nuovi o le note di rilascio e chiude con `VERDETTO: OK` o `VERDETTO: SOSPETTO`. Se è sospetto, l'aggiornamento si ferma;
+- **revisione**: legge i commit nuovi o le note di rilascio e chiude con `VERDICT: OK` o `VERDICT: SUSPICIOUS`. Se è sospetto, l'aggiornamento si ferma;
 - **patch**: se una patch non si applica più perché l'originale è cambiato, la rifà sulla nuova versione e la salva a parte, da controllare.
 
 Senza agente Leanling funziona lo stesso. Se una patch non si applica, si ferma e te lo dice.

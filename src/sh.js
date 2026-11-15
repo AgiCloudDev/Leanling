@@ -1,8 +1,8 @@
-// Esecuzione di comandi esterni (docker, git, scanner, agenti) senza shell intermedia.
+// Runs external commands (docker, git, scanners, agents) without an intermediate shell.
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
 
-/** Lancia un comando; `onLine` riceve ogni riga di output mentre arriva. */
+/** Runs a command; `onLine` receives each output line as it arrives. */
 export function run(cmd, args, { cwd, env, input, onLine, timeout = 0 } = {}) {
   return new Promise((resolve) => {
     const child = spawn(cmd, args, { cwd, env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -32,7 +32,7 @@ export function run(cmd, args, { cwd, env, input, onLine, timeout = 0 } = {}) {
 
 export const has = (bin) => spawnSync('sh', ['-c', `command -v ${bin}`]).status === 0;
 
-/** Porta libera su 127.0.0.1 per i container di prova */
+/** Free port on 127.0.0.1 for test containers */
 export const freePort = () =>
   new Promise((resolve, reject) => {
     const s = createServer();
